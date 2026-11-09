@@ -56,3 +56,17 @@ export function prng(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+/** Waits for pending microtasks and I/O callbacks to run. */
+export const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+/** Records everything sent through a transport, without altering behaviour. */
+export function recordSends<T extends { send(data: string | Uint8Array): void }>(transport: T): (string | Uint8Array)[] {
+  const sent: (string | Uint8Array)[] = [];
+  const send = transport.send.bind(transport);
+  transport.send = (data) => {
+    sent.push(data);
+    send(data);
+  };
+  return sent;
+}

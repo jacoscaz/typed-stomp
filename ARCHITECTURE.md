@@ -10,8 +10,8 @@ runtimes.
 - **Universal runtime support**: browsers, Node.js ≥ 24, Deno, Bun, workers.
   Only web-standard APIs are used in the core (`WebSocket`, `TextEncoder`,
   `TextDecoder`, `AbortSignal`, `Uint8Array`, `EventTarget`).
-- **Zero runtime dependencies** in the core. Optional peer dependencies only
-  for runtime-specific adapters (e.g. `ws` for Node.js servers).
+- **Zero runtime dependencies.** Implementation-specific `WebSocket` classes
+  (e.g. from `ws`) are passed in by the application, not imported.
 - **STOMP 1.2 first**, with negotiated fallback to 1.1 and 1.0.
 - **Typed frames**: frames are a discriminated union over `command`, with
   per-command (and, where the spec differs, per-version) header shapes.
@@ -112,27 +112,65 @@ Pure and synchronous, with no I/O and no knowledge of sessions.
 
 ```ts
 interface Transport {
+  readonly closed: boolean;
+  attach(handlers: { onMessage(data: string | Uint8Array): void; onClose(info: TransportCloseInfo): void }): void;
   send(data: string | Uint8Array): void;
   close(code?: number, reason?: string): void;
-  // events: open, message (string | Uint8Array), close, error
 }
 ```
 
-- Client: native `WebSocket` (available in all supported runtimes).
-- Server: Node.js has no built-in WebSocket **server**, so the server accepts
-  already-upgraded sockets through thin adapters: `ws` (optional peer
-  dependency), Deno (`Deno.upgradeWebSocket`), Bun (`Bun.serve` websocket
-  handlers). HTTP and upgrade handling stay with the host application.
-- An in-memory transport pair lets client and server sessions talk to each
-  other directly in tests.
+A transport is **open when constructed**; establishing the connection happens
+before. Events that occur before `attach()` are buffered, `onClose` fires
+exactly once, and `send()` throws once closed. `TransportBase` implements this
+bookkeeping for concrete transports.
+
+- **`WebSocketTransport`** wraps any object matching `WebSocketLike`, the
+  subset of the standard `WebSocket` API we use. This covers browser,
+  Node.js, Deno and Bun `WebSocket`s **and** the `WebSocket` class of the
+  `ws` package, on both the client and the server side (`ws` server sockets
+  can be wrapped directly).
+  - `WebSocketTransport.connect(url, { WebSocket, webSocketOptions, protocols,
+    signal })` instantiates the given constructor (default:
+    `globalThis.WebSocket`), passing `webSocketOptions` as the third,
+    implementation-specific argument (e.g. `ws` client options such as custom
+    headers), and resolves once the socket is open. STOMP subprotocols
+    (`v12.stomp`, `v11.stomp`, `v10.stomp`) are requested by default.
+  - `WebSocketTransport.open(socket)` waits for an existing socket to open
+    (e.g. Deno's `upgradeWebSocket`).
+- Server: Node.js has no built-in WebSocket **server**. HTTP and upgrade
+  handling stay with the host application, which hands open sockets to the
+  server. `ws` sockets need no adapter; Bun's `ServerWebSocket` (handler-based)
+  will get a thin one.
+- **`MemoryTransport.pair()`** creates two connected in-memory transports
+  (asynchronous, ordered delivery; binary data copied; `terminate()` simulates
+  connection loss) for tests.
 
 ### `connection/` — shared protocol core
 
-Common to both sides: wiring a parser and serializer to a transport, choosing
-text vs binary WebSocket messages, outgoing and incoming heart-beats (with
-tolerance for background-tab timer throttling in browsers), version and
-heart-beat negotiation helpers, receipt bookkeeping, and ERROR → close
-semantics.
+**`Connection`** (internal, not part of the public exports yet) is common to
+both sides:
+
+- wires a `FrameParser` and the serializer to a transport;
+- validates incoming frames for its role (lenient by default for clients,
+  strict for servers) and hands typed frames plus warnings to `onFrame`;
+- chooses text or binary WebSocket messages (`messageType: 'auto' | 'text' |
+  'binary'`; `auto` uses text unless the body is not valid UTF-8);
+- `pause()`/`resume()` hold back incoming frames (including ones already
+  received in the same transport message), so a server can authenticate
+  asynchronously and switch `version` before pipelined frames are decoded;
+- drives heart-beats with one timer per direction, re-armed from last-activity
+  timestamps, so sending and receiving cost nothing extra. The incoming check
+  allows `heartbeatTolerance` (default 2) times the negotiated interval;
+- turns malformed or invalid incoming data into a `StompProtocolError`. A
+  server replies with an `ERROR` frame (with `receipt-id` when available, and
+  the validation issues in the body), then the connection fails;
+- `close()` is orderly (waits for the transport); `fail(error, finalFrame?)`
+  calls `onClose` immediately, without waiting for a closing handshake that
+  may never complete with an unresponsive peer.
+
+Helpers: `negotiateVersion`, `parseAcceptVersion`, `parseHeartBeat`,
+`formatHeartBeat`, `negotiateHeartBeat` (symmetric, used by both sides), and
+`ReceiptTracker` (receipt promises that never cause unhandled rejections).
 
 ### `client/`
 
@@ -217,13 +255,13 @@ semantics.
 - ESM only, `"type": "module"`, Node.js ≥ 24.
 - Built with TypeScript 7 (`tsc`).
 - Single package with subpath exports: `typed-stomp`, `typed-stomp/codec`,
-  `typed-stomp/client`, `typed-stomp/server`, `typed-stomp/server/ws`,
+  `typed-stomp/frames`, `typed-stomp/transport`, `typed-stomp/client`, `typed-stomp/server`,
   `typed-stomp/server/memory`.
 
 ## Testing
 
 Build- and test-time dependencies are kept to a minimum: `typescript` and
-`@types/node`, plus `ws` once the server adapters land.
+`@types/node`, `ws` and `@types/ws`.
 
 - **Node's native test runner** (`node:test`, `node:assert`). Tests are
   written in TypeScript and run directly from source via Node's built-in type
@@ -233,8 +271,8 @@ Build- and test-time dependencies are kept to a minimum: `typescript` and
 - Unit tests: codec (including randomized split-point round-trips),
   validator, sessions over in-memory transports, and client ↔ server tests
   against `InMemoryBroker`.
-- WebSocket tests run on Node only: the client uses Node's native
-  `WebSocket`, the server uses the `ws` adapter.
+- WebSocket tests run on Node only, against a `ws` server, with both Node's
+  native `WebSocket` and `ws`'s `WebSocket` as clients.
 - **Spring interop** uses the `docker` CLI directly (build, run, inspect the
   mapped port, stop) from a small test helper rather than a container
   library, with one Spring Boot fixture image (`test/fixtures/spring-broker/`):
@@ -245,10 +283,10 @@ Build- and test-time dependencies are kept to a minimum: `typescript` and
 
 ## Roadmap
 
-1. Codec and frame validation. ← *current*
-2. Transport interface, in-memory transport, shared connection core.
-3. Client session, client and subscription dispatcher.
+1. Codec and frame validation. ✓
+2. Transport interface, in-memory transport, shared connection core. ✓
+3. Client session, client and subscription dispatcher. ← *next*
 4. Server session, `StompServer`, `Broker` interface, `InMemoryBroker`.
-5. Server adapters (`ws`, Deno, Bun).
+5. Server adapters for runtimes whose sockets are not `WebSocketLike` (Bun).
 6. Spring interop fixtures and tests.
 7. Later: async-iterator subscriptions, raw TCP transport.

@@ -28,6 +28,10 @@
       "types": "./dist/frames/index.d.ts",
       "default": "./dist/frames/index.js"
     },
+    "./transport": {
+      "types": "./dist/transport/index.d.ts",
+      "default": "./dist/transport/index.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -47,6 +51,8 @@
   ],
   "devDependencies": {
     "@types/node": "24.19.2",
-    "typescript": "7.0.2"
+    "@types/ws": "8.18.2",
+    "typescript": "7.0.2",
+    "ws": "8.22.2"
   }
 }

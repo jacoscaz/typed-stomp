@@ -77,6 +77,8 @@ export class FrameParser {
 
   #state: State = 'idle';
   #failed = false;
+  #paused = false;
+  #draining = false;
   #command = '';
   #headers: Record<string, string> = Object.create(null);
   #headerCount = 0;
@@ -108,13 +110,53 @@ export class FrameParser {
    * Throws {@link StompParseError} on malformed input, after which the parser
    * refuses further input until {@link FrameParser.reset} is called. Errors
    * thrown by the callbacks propagate unchanged and leave the parser usable:
-   * frames left in the buffer are emitted on the next call to `push`.
+   * frames left in the buffer are emitted on the next call to `push` or
+   * `resume`.
    */
   push(input: ParserInput): void {
     if (this.#failed) {
       throw new StompParseError('parser-failed', 'Parser is in a failed state and must be reset');
     }
     this.#append(toBytes(input));
+    this.#run();
+  }
+
+  /** Whether frame emission is paused. */
+  get paused(): boolean {
+    return this.#paused;
+  }
+
+  /**
+   * Stops emitting frames. Data passed to `push` is buffered until
+   * {@link FrameParser.resume} is called. When called from within `onFrame`,
+   * the remaining data of the current chunk is held back too, which lets the
+   * consumer finish an asynchronous step (e.g. authentication) and update
+   * {@link FrameParser.version} before further frames are decoded.
+   */
+  pause(): void {
+    this.#paused = true;
+  }
+
+  /**
+   * Resumes emitting frames, synchronously processing any buffered data.
+   * May throw, like {@link FrameParser.push}.
+   */
+  resume(): void {
+    if (!this.#paused) {
+      return;
+    }
+    this.#paused = false;
+    if (!this.#failed) {
+      this.#run();
+    }
+  }
+
+  #run(): void {
+    if (this.#draining) {
+      // Re-entrant call from a callback: the outer loop picks up new data.
+      return;
+    }
+    this.#draining = true;
     try {
       this.#drain();
     } catch (err) {
@@ -123,6 +165,7 @@ export class FrameParser {
       }
       throw err;
     } finally {
+      this.#draining = false;
       this.#release();
     }
   }
@@ -135,6 +178,7 @@ export class FrameParser {
     this.#scan = 0;
     this.#state = 'idle';
     this.#failed = false;
+    this.#paused = false;
     this.#command = '';
     this.#headers = Object.create(null);
     this.#headerCount = 0;
@@ -143,7 +187,7 @@ export class FrameParser {
   }
 
   #drain(): void {
-    for (;;) {
+    while (!this.#paused) {
       switch (this.#state) {
         case 'idle':
           if (!this.#skipEol()) {

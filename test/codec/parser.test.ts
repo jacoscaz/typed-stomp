@@ -208,6 +208,55 @@ describe('FrameParser', () => {
     assert.equal(calls, 3);
   });
 
+  describe('pausing', () => {
+    it('holds back the rest of a chunk when paused from onFrame', () => {
+      const seen: string[] = [];
+      const parser = new FrameParser({
+        onFrame: (frame) => {
+          seen.push(frame.command);
+          if (frame.command === 'CONNECT') {
+            parser.pause();
+          }
+        },
+      });
+      parser.push('CONNECT\n\n\0SEND\n\n\0');
+      assert.deepEqual(seen, ['CONNECT']);
+      assert.equal(parser.paused, true);
+      parser.push('SEND\n\n\0');
+      assert.deepEqual(seen, ['CONNECT']);
+      parser.resume();
+      assert.deepEqual(seen, ['CONNECT', 'SEND', 'SEND']);
+      assert.equal(parser.buffered, 0);
+    });
+
+    it('treats resume as a no-op when not paused', () => {
+      const { parser, collected } = collectingParser();
+      parser.resume();
+      parser.push('SEND\n\n\0');
+      assert.equal(collected.frames.length, 1);
+    });
+
+    it('reports parse errors in buffered data on resume', () => {
+      const { parser } = collectingParser();
+      parser.pause();
+      parser.push('SEND\nbad\n\n\0');
+      assert.throws(() => parser.resume(), isParseError('invalid-header'));
+    });
+
+    it('supports synchronous pause and resume from onFrame', () => {
+      const seen: string[] = [];
+      const parser = new FrameParser({
+        onFrame: (frame) => {
+          seen.push(frame.headers['n'] ?? '');
+          parser.pause();
+          parser.resume();
+        },
+      });
+      parser.push('SEND\nn:1\n\n\0SEND\nn:2\n\n\0');
+      assert.deepEqual(seen, ['1', '2']);
+    });
+  });
+
   it('tracks partial frames and buffered bytes', () => {
     const { parser } = collectingParser();
     assert.equal(parser.partial, false);
