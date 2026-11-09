@@ -248,16 +248,36 @@ Helpers: `negotiateVersion`, `parseAcceptVersion`, `parseHeartBeat`,
 
 ### `server/`
 
-- **`StompServer`** accepts transports and creates one `ServerSession` per
-  connection.
-- **`ServerSession`** handles `CONNECT`/`STOMP` negotiation (version,
-  heart-beats, `host`), validates every frame, manages receipts, normalises
-  ack identifiers across versions, and forwards to the broker. Parsing is
-  paused while the asynchronous `authenticate` hook runs, so pipelined frames
-  are decoded with the negotiated version.
-- **Hooks**: `authenticate(connectFrame) → principal | reject`, and frame
-  interceptors for authorization or rewriting before routing.
-- **`Broker` interface** (sketch):
+- **`ServerSession`**: the server side of one session; implements
+  `BrokerSession`, the broker's view of it.
+  - Handshake: the first frame must be `CONNECT`/`STOMP` (within
+    `connectTimeout`, default 10 s). The highest common version is picked;
+    with none, the `ERROR` frame lists the supported versions in a `version`
+    header. The `authenticate(request)` hook returns a principal or throws to
+    refuse; then `broker.connect` runs, `CONNECTED` is sent (`version`,
+    `session`, `server`, `heart-beat`) and heart-beats start.
+  - Frames are processed **one at a time, in order**: incoming frames are held
+    back (via `Connection.pause()`) while the broker handles the current one,
+    which also means frames pipelined behind `CONNECT` are decoded with the
+    negotiated version, and slow brokers apply backpressure.
+  - The `authorize(session, frame)` hook runs before every frame after the
+    handshake (except `DISCONNECT`); throwing refuses it.
+  - `RECEIPT`s are sent once the broker has processed the frame. Any failure
+    (protocol error, hook or broker error) is answered with an `ERROR` frame
+    carrying the message and the `receipt-id`, and the session closes.
+  - `deliver()` fills in `message-id`, `subscription` (omitted for 1.0
+    subscriptions without an id) and, for client ack modes in 1.2, a
+    generated `ack` id. Pending acknowledgements are tracked so that
+    `ACK`/`NACK` frames are mapped back to `{ subscriptionId, messageId }`
+    whatever the version, unknown ones are rejected, and `client` mode
+    settles earlier messages cumulatively.
+  - On close, open native transactions are aborted and `broker.disconnect`
+    is called (only for sessions the broker saw connect).
+- **`StompServer`**: accepts open transports (`accept(transport,
+  context?)`), runs a `ServerSession` for each, and emits `connect`,
+  `disconnect` and `error` events. It does not listen on any port. `close()`
+  closes all sessions and waits for the broker.
+- **`Broker` interface**:
 
   ```ts
   interface Broker {
@@ -277,31 +297,51 @@ Helpers: `negotiateVersion`, `parseAcceptVersion`, `parseHeartBeat`,
     readonly id: string;
     readonly version: StompVersion;
     readonly principal: unknown;
-    deliver(subscriptionId: string, message: OutboundMessage): void;
-    close(error?: { message: string; body?: string | Uint8Array }): void;
+    readonly host: string | undefined;
+    readonly context: unknown;
+    readonly active: boolean;
+    deliver(subscriptionId: string, message: OutboundMessage): boolean;
+    close(error?: { message: string; headers?: FrameHeaders; body?: string | Uint8Array }): void;
   }
   ```
 
-  `AckRef` is always `{ subscriptionId, messageId }`, whatever the version;
-  the session maps 1.2 `ack` ids back to it. `deliver()` fills in the
-  `subscription`, `message-id` and `ack` headers for the negotiated version.
+  `AckRef` is always `{ subscriptionId, messageId }`, whatever the version.
+  Throwing from a broker method rejects the frame being processed.
 
 - **Transactions**: if the broker implements `begin`/`commit`/`abort` they
   are used; otherwise the session buffers `SEND`/`ACK`/`NACK` between `BEGIN`
-  and `COMMIT` and replays them on commit (not atomic).
-- **`InMemoryBroker`** (`typed-stomp/server/memory`): topic fan-out and queue
-  round-robin (configurable destination prefixes), all three ack modes,
-  redelivery on `NACK` or disconnect, optional per-subscription prefetch, and
-  native transactions. It is written purely against the public `Broker`
+  and `COMMIT` and replays them on commit (not atomic). Either way, the
+  session rejects unknown and duplicate transaction ids.
+- **`InMemoryBroker`**: written purely against the public `Broker`
   interface.
+  - Topics (default) fan out to current subscribers; queues (destinations
+    with a queue prefix, `/queue/` by default) keep messages until a
+    consumer is available and distribute them round-robin.
+  - All three ack modes; `client` mode settles cumulatively.
+  - Unacknowledged queue messages are redelivered (with `redelivered: true`)
+    on `NACK`, unsubscribe or disconnect; unacknowledged topic messages are
+    dropped in those cases.
+  - Prefetch (broker default, or a `prefetch-count` subscription header)
+    limits unacknowledged messages per subscription; topic messages beyond
+    it wait in a per-subscription backlog.
+  - Native transactions, applied atomically on commit.
+  - `send(destination, body, headers)` publishes from the application;
+    `pending()` and `subscribers()` help with introspection.
+- **`WebSocketBroker`**: a ready-to-run server: a WebSocket server wired to a
+  `StompServer` and a broker (`InMemoryBroker` by default). The
+  `WebSocketServer` class is injected (`WebSocketBroker.listen({
+  WebSocketServer, webSocketServerOptions: { port } })`, or `{ server,
+  path }` to share an HTTP server), so the library never imports `ws`.
+  `handleProtocols` selects a STOMP subprotocol by default, and each
+  connection's upgrade request becomes `session.context`.
 
 ## Packaging
 
 - ESM only, `"type": "module"`, Node.js ≥ 24.
 - Built with TypeScript 7 (`tsc`).
 - Single package with subpath exports: `typed-stomp`, `typed-stomp/codec`,
-  `typed-stomp/frames`, `typed-stomp/transport`, `typed-stomp/client`, `typed-stomp/server`,
-  `typed-stomp/server/memory`.
+  `typed-stomp/frames`, `typed-stomp/transport`, `typed-stomp/client` and
+  `typed-stomp/server` (including `InMemoryBroker` and `WebSocketBroker`).
 
 ## Testing
 
@@ -331,7 +371,9 @@ Build- and test-time dependencies are kept to a minimum: `typescript` and
 1. Codec and frame validation. ✓
 2. Transport interface, in-memory transport, shared connection core. ✓
 3. Client session, client and subscription dispatcher. ✓
-4. Server session, `StompServer`, `Broker` interface, `InMemoryBroker`. ← *next*
+4. Server session, `StompServer`, `Broker` interface, `InMemoryBroker`,
+   `WebSocketBroker`. ✓
 5. Server adapters for runtimes whose sockets are not `WebSocketLike` (Bun).
+   ← *next*
 6. Spring interop fixtures and tests.
 7. Later: async-iterator subscriptions, raw TCP transport.

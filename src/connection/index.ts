@@ -23,5 +23,6 @@ export {
   parseHeartBeat,
   type HeartBeat,
   type HeartBeatIntervals,
+  type HeartbeatOptions,
 } from './negotiate.ts';
 export { ReceiptTracker, type ReceiptRequest } from './receipts.ts';

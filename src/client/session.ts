@@ -12,20 +12,16 @@ import {
   negotiateHeartBeat,
   parseHeartBeat,
   type HeartBeatIntervals,
+  type HeartbeatOptions,
 } from '../connection/negotiate.ts';
+
+export type { HeartbeatOptions } from '../connection/negotiate.ts';
 import { ReceiptTracker } from '../connection/receipts.ts';
 import type { AckMode, ErrorFrame, MessageFrame, ServerFrame } from '../frames/types.ts';
 import type { ValidationIssue, ValidationMode } from '../frames/validate.ts';
 import type { Transport } from '../transport/types.ts';
 import { StompConnectTimeoutError, StompNotConnectedError, StompServerError } from './errors.ts';
 import { StompMessage, type AckOptions } from './message.ts';
-
-export interface HeartbeatOptions {
-  /** How often we can send heart-beats, in ms; 0 for never. */
-  readonly outgoing: number;
-  /** How often we want to receive heart-beats, in ms; 0 for never. */
-  readonly incoming: number;
-}
 
 export const DEFAULT_HEARTBEAT: HeartbeatOptions = Object.freeze({ outgoing: 10_000, incoming: 10_000 });
 

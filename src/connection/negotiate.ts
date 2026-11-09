@@ -62,6 +62,14 @@ export function formatHeartBeat([canSend, wantsToReceive]: HeartBeat): string {
   return `${Math.max(0, Math.trunc(canSend))},${Math.max(0, Math.trunc(wantsToReceive))}`;
 }
 
+/** Heart-beat preferences of one side of a connection. */
+export interface HeartbeatOptions {
+  /** How often we can send heart-beats, in ms; 0 for never. */
+  readonly outgoing: number;
+  /** How often we want to receive heart-beats, in ms; 0 for never. */
+  readonly incoming: number;
+}
+
 export interface HeartBeatIntervals {
   /** Interval at which we must send heart-beats, or 0 for none. */
   readonly outgoing: number;
