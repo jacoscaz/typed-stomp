@@ -32,6 +32,10 @@
       "types": "./dist/transport/index.d.ts",
       "default": "./dist/transport/index.js"
     },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "default": "./dist/client/index.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {

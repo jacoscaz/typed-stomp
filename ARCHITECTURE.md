@@ -174,14 +174,51 @@ Helpers: `negotiateVersion`, `parseAcceptVersion`, `parseHeartBeat`,
 
 ### `client/`
 
-- **`ClientSession`**: the protocol state machine for a single connection
-  (`connecting → connected → disconnecting → closed`). Receipts are Promises
-  (`{ receipt: true }` on any frame; `DISCONNECT` always awaits one). `ERROR`
-  frames become typed errors that reject pending operations.
-- **`Client`**: reconnect policy on top of sessions — exponential backoff with
-  jitter, an async `connectHeaders()` hook (e.g. for refreshing tokens),
-  automatic resubscription, configurable offline behaviour (reject by default).
-- **Subscriptions** are callback-based:
+- **`ClientSession`**: a single session over a single transport, with no
+  reconnection (`connecting → connected → disconnecting → closed`).
+  - `ClientSession.connect({ transport, headers, host, versions, heartbeat,
+    connectTimeout, signal, ... })` sends `CONNECT` (or `STOMP`) and resolves
+    on `CONNECTED`, having negotiated the version (it must be one we offered)
+    and heart-beats. `host` defaults to `/`, the default virtual host of
+    brokers that use it. An `ERROR` reply rejects with `StompServerError`.
+  - `send`, `subscribe`, `begin` (transactions), message `ack`/`nack`.
+    `{ receipt: true }` on any of them makes the returned promise wait for
+    the `RECEIPT`. Session subscription handlers are synchronous.
+  - Incoming `MESSAGE` frames are routed by `subscription` header (by
+    destination for 1.0 servers that omit it); messages for unknown
+    subscriptions are ignored.
+  - An `ERROR` frame after connecting rejects the matching receipt, if any,
+    and fails the session; all pending receipts are rejected on close.
+  - `disconnect({ timeout })` sends `DISCONNECT`, waits for its receipt (or
+    the timeout), then closes. `abort()` closes immediately. `closed`
+    resolves with the close info.
+- **`StompMessage`**: headers, body, `text()`, `json<T>()` (a cast, not
+  validation), and `ack()`/`nack()` with the right headers for the version
+  (`id` from the `ack` header in 1.2; `message-id` + `subscription` in 1.1;
+  `message-id` in 1.0, where `NACK` is rejected). Acknowledging is a no-op in
+  `auto` mode, only the first call counts, and acknowledging a message from
+  a session that has ended rejects with `StompNotConnectedError`.
+- **`Client`**: keeps a session alive on top of `ClientSession`.
+  - Connects via `url` (+ optional `WebSocket` constructor and
+    `webSocketOptions`) or a custom `transport` factory.
+  - `connect()` resolves on the first successful session; failed attempts are
+    retried per the reconnection policy. It rejects if the client gives up
+    or is closed first.
+  - Reconnection: exponential backoff (`initialDelay` 1 s, `factor` 2,
+    `maxDelay` 30 s, `jitter` 0.5 as a random reduction of up to 50%),
+    `maxAttempts` (consecutive failures) and a `shouldReconnect(error,
+    attempt)` hook. `reconnect: false` disables it. `connectHeaders` may be a
+    function, called before every attempt (e.g. to refresh tokens).
+  - `publish()` rejects while offline, or queues (bounded) with
+    `offline: 'queue'`. `transaction(fn)` commits if `fn` succeeds and
+    aborts otherwise. `close()` disconnects gracefully and is idempotent;
+    `await using` is supported.
+  - Events (`client.on(...)`): `connect`, `disconnect` (with `willReconnect`),
+    `reconnecting` (with `attempt` and `delay`), `warning` (validation
+    warnings), `error` (subscription errors; reported as uncaught if nobody
+    listens), `close`.
+- **`Subscription`** (from `client.subscribe`) survives reconnections: it is
+  re-established with the same id on every new session.
 
   ```ts
   const sub = client.subscribe('/queue/jobs', async (msg) => {
@@ -189,13 +226,21 @@ Helpers: `negotiateVersion`, `parseAcceptVersion`, `parseHeartBeat`,
     await msg.ack();
   }, { ack: 'client-individual', concurrency: 1, buffer: { limit: 1000, overflow: 'error' } });
 
-  sub.pause(); sub.resume(); sub.paused; await sub.unsubscribe();
+  sub.pause(); sub.resume(); sub.paused; sub.buffered; await sub.idle(); await sub.unsubscribe();
   ```
 
-  - If a callback returns a Promise, the dispatcher waits for it, keeping at
-    most `concurrency` callbacks in flight.
-  - While paused or saturated, messages accumulate in a bounded buffer;
-    `overflow` selects `'error' | 'drop-oldest' | 'drop-newest'`.
+  - Messages go through a **`Dispatcher`**: if the handler returns a
+    promise, the dispatcher waits for it, keeping at most `concurrency`
+    (default 1, i.e. strictly in order) calls in flight.
+  - While paused or saturated, messages accumulate in a bounded buffer
+    (default 10000). `overflow`: `error` (default) ends the subscription and
+    reports a `StompBufferOverflowError`; `drop-oldest` and `drop-newest`
+    discard messages.
+  - Handler errors go to the subscription's `onError`, or the client's
+    `error` event; the subscription continues.
+  - When a session ends, buffered messages received in a `client` ack mode
+    are discarded (they can no longer be acknowledged, and the broker will
+    redeliver them); `auto` mode messages are still handled.
   - Real broker-side flow control requires `client` ack modes plus broker
     prefetch (Spring's SimpleBroker does not support this; its broker relay
     and `InMemoryBroker` do).
@@ -285,8 +330,8 @@ Build- and test-time dependencies are kept to a minimum: `typescript` and
 
 1. Codec and frame validation. ✓
 2. Transport interface, in-memory transport, shared connection core. ✓
-3. Client session, client and subscription dispatcher. ← *next*
-4. Server session, `StompServer`, `Broker` interface, `InMemoryBroker`.
+3. Client session, client and subscription dispatcher. ✓
+4. Server session, `StompServer`, `Broker` interface, `InMemoryBroker`. ← *next*
 5. Server adapters for runtimes whose sockets are not `WebSocketLike` (Bun).
 6. Spring interop fixtures and tests.
 7. Later: async-iterator subscriptions, raw TCP transport.
