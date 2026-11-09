@@ -117,6 +117,14 @@ class Issues {
     this.#add(this.#strict ? 'error' : 'warning', code, message, header);
   }
 
+  /**
+   * A violation that is common enough among widely used implementations
+   * that it is only ever reported as a warning.
+   */
+  warn(code: IssueCode, message: string, header?: string): void {
+    this.#add('warning', code, message, header);
+  }
+
   #add(severity: 'error' | 'warning', code: IssueCode, message: string, header: string | undefined): void {
     if (severity === 'error') {
       this.#failed = true;
@@ -200,10 +208,12 @@ function checkConnect({ command, headers }: Frame, issues: Issues): void {
     if (tokens.some((token) => !VERSION_TOKEN.test(token))) {
       issues.soft('invalid-header', `Invalid accept-version header: "${acceptVersion}"`, 'accept-version');
     }
-    // From 1.1 onwards clients must also send a host header.
+    // From 1.1 onwards clients must also send a host header. Popular clients
+    // (Spring's WebSocketStompClient, stomp.js) omit it, so this is only a
+    // warning, even in strict mode.
     const modern = tokens.some((token) => isStompVersion(token) && token !== '1.0');
     if (modern && headers['host'] === undefined) {
-      issues.soft('missing-header', `${command} frames for STOMP 1.1+ require a "host" header`, 'host');
+      issues.warn('missing-header', `${command} frames for STOMP 1.1+ require a "host" header`, 'host');
     }
   }
   checkHeartBeat(headers['heart-beat'], issues);

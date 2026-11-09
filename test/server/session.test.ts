@@ -78,10 +78,20 @@ describe('ServerSession', () => {
       const { broker } = recordingBroker();
       const { transport } = serve({ broker });
       const peer = raw(transport);
-      // STOMP 1.1+ CONNECT frames require a host header.
-      peer.end.send('CONNECT\naccept-version:1.2\n\n\0');
+      // Spaces are not allowed in heart-beat headers.
+      peer.end.send('CONNECT\naccept-version:1.2\nhost:/\nheart-beat:10, 10\n\n\0');
       await until(() => peer.closed);
-      assert.match(peer.received[0] ?? '', /host/);
+      assert.match(peer.received[0] ?? '', /Invalid heart-beat header/);
+    });
+
+    it('accepts CONNECT frames without a host header, like the ones Spring sends', async () => {
+      const { broker } = recordingBroker();
+      const { transport } = serve({ broker });
+      const peer = raw(transport);
+      peer.end.send('CONNECT\nheart-beat:0,0\naccept-version:1.1,1.2\n\n\0');
+      await until(() => peer.received.length === 1);
+      assert.match(peer.received[0] ?? '', /^CONNECTED\nversion:1\.2\n/);
+      peer.end.close();
     });
 
     it('times out clients that never send CONNECT', async () => {

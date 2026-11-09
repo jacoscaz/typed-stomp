@@ -113,12 +113,14 @@ describe('frame validation', () => {
       assert.equal(client(frame('STOMP', { 'accept-version': '1.2', host: 'h' }), '1.0').valid, true);
     });
 
-    it('requires host for 1.1+ CONNECT and STOMP frames in strict mode', () => {
-      assert.deepEqual(codes(client(frame('CONNECT', { 'accept-version': '1.1,1.2' }))), ['missing-header']);
-      assert.equal(client(frame('CONNECT', { 'accept-version': '1.0' })).valid, true);
-      const lenient = client(frame('CONNECT', { 'accept-version': '1.2' }), '1.2', 'lenient');
-      assert.equal(lenient.valid, true);
-      assert.deepEqual(codes(lenient, 'warning'), ['missing-header']);
+    it('only warns about missing host headers on 1.1+ CONNECT frames, even in strict mode', () => {
+      // Spring's WebSocketStompClient and stomp.js omit the host header.
+      for (const mode of ['strict', 'lenient'] as const) {
+        const result = client(frame('CONNECT', { 'accept-version': '1.1,1.2' }), '1.2', mode);
+        assert.equal(result.valid, true);
+        assert.deepEqual(codes(result, 'warning'), ['missing-header']);
+      }
+      assert.deepEqual(client(frame('CONNECT', { 'accept-version': '1.0' })).issues, []);
     });
 
     it('requires accept-version on STOMP frames', () => {

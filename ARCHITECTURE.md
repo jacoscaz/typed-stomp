@@ -140,7 +140,7 @@ bookkeeping for concrete transports.
 - Server: Node.js has no built-in WebSocket **server**. HTTP and upgrade
   handling stay with the host application, which hands open sockets to the
   server. `ws` sockets need no adapter; Bun's `ServerWebSocket` (handler-based)
-  will get a thin one.
+  would need a thin adapter (deferred).
 - **`MemoryTransport.pair()`** creates two connected in-memory transports
   (asynchronous, ordered delivery; binary data copied; `terminate()` simulates
   connection loss) for tests.
@@ -358,13 +358,24 @@ Build- and test-time dependencies are kept to a minimum: `typescript` and
   against `InMemoryBroker`.
 - WebSocket tests run on Node only, against a `ws` server, with both Node's
   native `WebSocket` and `ws`'s `WebSocket` as clients.
-- **Spring interop** uses the `docker` CLI directly (build, run, inspect the
-  mapped port, stop) from a small test helper rather than a container
-  library, with one Spring Boot fixture image (`test/fixtures/spring-broker/`):
+- Compile-only checks in `test/types/` cover WebSocket implementations'
+  assignability and the README examples.
+- **Spring interop** (`npm run test:interop`, `test/interop/*.interop.ts`,
+  kept out of `npm test`; skipped without Docker) uses the `docker` CLI
+  directly (build, run, inspect the mapped port, remove) from a small helper
+  rather than a container library, with one Spring Boot 4 fixture image
+  (`test/fixtures/spring-broker/`):
   - our client against Spring's broker (`@EnableWebSocketMessageBroker`,
-    SimpleBroker, raw WebSocket endpoint, a few `@MessageMapping` handlers);
-  - our server against Spring's `WebSocketStompClient`, which runs a scripted
-    scenario against our server on the host and reports pass/fail.
+    simple broker, raw WebSocket endpoint at `/ws`, `@MessageMapping`
+    handlers at `/app/echo` and `/app/upper`), with both `WebSocket`
+    implementations, versions 1.2 and 1.1;
+  - our server (`WebSocketBroker`) against Spring's `WebSocketStompClient`
+    (`MODE=client`), which connects with heart-beats, subscribes, sends with
+    a receipt, expects a reply from a typed-stomp client, disconnects, and
+    reports the result through its exit code.
+  - Findings so far: Spring's client omits the `host` header (now only a
+    validation warning), and Spring's simple broker does not answer receipts
+    for `SUBSCRIBE` and `SEND`.
 
 ## Roadmap
 
@@ -373,7 +384,6 @@ Build- and test-time dependencies are kept to a minimum: `typescript` and
 3. Client session, client and subscription dispatcher. ✓
 4. Server session, `StompServer`, `Broker` interface, `InMemoryBroker`,
    `WebSocketBroker`. ✓
-5. Server adapters for runtimes whose sockets are not `WebSocketLike` (Bun).
-   ← *next*
-6. Spring interop fixtures and tests.
-7. Later: async-iterator subscriptions, raw TCP transport.
+5. Spring interop fixtures and tests. ✓
+6. Later: server adapters for runtimes whose sockets are not `WebSocketLike`
+   (Bun), async-iterator subscriptions, raw TCP transport.
