@@ -26,10 +26,18 @@ const implementations: [string, WebSocketConstructor<never> | undefined][] = [
   ['the ws WebSocket', WsWebSocket],
 ];
 
+/**
+ * Spring's simple broker does not answer receipts for SUBSCRIBE, and handles
+ * inbound frames on a thread pool, so a SEND right after a SUBSCRIBE can
+ * overtake it. Give Spring a moment to register subscriptions.
+ */
+const subscriptionSettled = () => new Promise((resolve) => setTimeout(resolve, 200));
+
 describe('Spring interoperability', { skip }, () => {
+  // The first build downloads Maven dependencies and can take minutes.
   before(async () => {
     await buildImage(IMAGE, FIXTURE);
-  });
+  }, { timeout: 15 * 60_000 });
 
   describe('typed-stomp client against the Spring broker', () => {
     let container: Container;
@@ -62,6 +70,7 @@ describe('Spring interoperability', { skip }, () => {
           received.push(message.text());
         });
         await sub.ready;
+        await subscriptionSettled();
         await client.publish('/app/echo', 'héllo, Spring');
         await until(() => received.length === 1);
         assert.deepEqual(received, ['héllo, Spring']);
@@ -77,9 +86,7 @@ describe('Spring interoperability', { skip }, () => {
         messages.push(message);
       });
       await sub.ready;
-      // Give Spring a moment to register the subscription: without receipts,
-      // there is no confirmation.
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await subscriptionSettled();
       await a.publish('/queue/inbox', JSON.stringify({ n: 42 }), {
         contentType: 'application/json',
         headers: { custom: 'header' },
@@ -100,7 +107,7 @@ describe('Spring interoperability', { skip }, () => {
         received.push(message.text());
       });
       await sub.ready;
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await subscriptionSettled();
       await client.publish('/app/upper', 'shout');
       await until(() => received.length === 1);
       assert.deepEqual(received, ['SHOUT']);

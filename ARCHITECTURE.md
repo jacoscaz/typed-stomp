@@ -373,9 +373,22 @@ Build- and test-time dependencies are kept to a minimum: `typescript` and
     (`MODE=client`), which connects with heart-beats, subscribes, sends with
     a receipt, expects a reply from a typed-stomp client, disconnects, and
     reports the result through its exit code.
-  - Findings so far: Spring's client omits the `host` header (now only a
-    validation warning), and Spring's simple broker does not answer receipts
-    for `SUBSCRIBE` and `SEND`.
+- **RabbitMQ interop** (`test/interop/rabbitmq.interop.ts`) runs the
+  official `rabbitmq:4` image, enabling the `rabbitmq_web_stomp` plugin by
+  overriding the command (no build), and retries connecting until the broker
+  is up. It covers both `WebSocket` implementations, receipts, queue
+  retention, `prefetch-count` flow control with `client-individual` acks,
+  NACK redelivery, redelivery to another consumer after disconnect,
+  committed and aborted transactions, 1.1 acknowledgements, heart-beats,
+  authentication errors and graceful disconnects.
+- Interop tests run with a 2-minute per-test timeout; only the image build
+  and pull hooks get longer.
+- Findings so far:
+  - Spring's client omits the `host` header (now only a validation warning).
+  - Spring's simple broker does not answer receipts for `SUBSCRIBE` and
+    `SEND`, and processes inbound frames concurrently, so tests wait briefly
+    after subscribing.
+  - RabbitMQ delays receipts for transactional frames until commit.
 
 ## Roadmap
 
@@ -384,6 +397,6 @@ Build- and test-time dependencies are kept to a minimum: `typescript` and
 3. Client session, client and subscription dispatcher. ✓
 4. Server session, `StompServer`, `Broker` interface, `InMemoryBroker`,
    `WebSocketBroker`. ✓
-5. Spring interop fixtures and tests. ✓
+5. Spring and RabbitMQ interop tests. ✓
 6. Later: server adapters for runtimes whose sockets are not `WebSocketLike`
    (Bun), async-iterator subscriptions, raw TCP transport.

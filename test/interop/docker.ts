@@ -30,10 +30,17 @@ export interface Container {
   remove(): Promise<void>;
 }
 
-/** Starts a container in the background, publishing ports on 127.0.0.1. */
-export async function runDetached(image: string, ports: readonly number[]): Promise<Container> {
+/**
+ * Starts a container in the background, publishing ports on 127.0.0.1,
+ * optionally overriding the image's command.
+ */
+export async function runDetached(
+  image: string,
+  ports: readonly number[],
+  command: readonly string[] = [],
+): Promise<Container> {
   const publish = ports.flatMap((port) => ['--publish', `127.0.0.1::${port}`]);
-  const id = await docker(['run', '--detach', ...publish, image]);
+  const id = await docker(['run', '--detach', ...publish, image, ...command]);
   return {
     id,
     async port(containerPort) {
@@ -71,6 +78,21 @@ export async function runToCompletion(
   } catch (err) {
     const error = err as { code?: number; stdout?: string; stderr?: string };
     return { code: typeof error.code === 'number' ? error.code : -1, output: `${error.stdout ?? ''}${error.stderr ?? ''}` };
+  }
+}
+
+/** Retries `attempt` until it resolves, or rethrows its last error after `timeout` ms. */
+export async function retry<T>(attempt: () => Promise<T>, timeout = 120_000, interval = 500): Promise<T> {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    try {
+      return await attempt();
+    } catch (err) {
+      if (Date.now() > deadline) {
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, interval));
+    }
   }
 }
 

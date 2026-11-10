@@ -46,7 +46,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test \"test/**/*.test.ts\"",
-    "test:interop": "node --test --test-timeout=900000 \"test/interop/*.interop.ts\"",
+    "test:interop": "node --test --test-timeout=120000 \"test/interop/*.interop.ts\"",
     "check": "npm run typecheck && npm test",
     "prepack": "npm run build"
   },

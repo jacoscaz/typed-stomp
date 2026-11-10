@@ -17,7 +17,8 @@ It provides both a **client** and a **server**.
   pause/resume and bounded buffers.
 - **Pluggable brokers** on the server side, with a ready-to-run in-memory
   broker and WebSocket server.
-- Tested for interoperability with **Spring**'s STOMP client and broker.
+- Tested for interoperability with **Spring**'s STOMP client and broker, and
+  with **RabbitMQ**.
 
 Payloads are opaque bytes: validating them is left to your schema library of
 choice.
@@ -295,20 +296,26 @@ Everything is also exported from `typed-stomp`.
 - **Spring's simple broker** has no acknowledgement or prefetch support, so
   flow control with `client` ack modes requires a full broker (e.g.
   RabbitMQ, ActiveMQ, or Spring's broker relay to one).
+- **RabbitMQ** (Web STOMP plugin, `ws://host:15674/ws`) supports receipts,
+  `prefetch-count`, NACK with redelivery and transactions. It only sends
+  receipts for frames inside a transaction once the transaction commits, so
+  don't await `receipt: true` sends inside `client.transaction()`. It also
+  copies the sender's `receipt` header into delivered messages.
 
 ## Development
 
 ```sh
 npm run typecheck     # TypeScript 7, including tests
 npm test              # unit and WebSocket tests (node:test, no Docker needed)
-npm run test:interop  # Spring interoperability tests; requires Docker
+npm run test:interop  # Spring and RabbitMQ interoperability tests; requires Docker
 npm run build         # emits dist/
 ```
 
 The interop tests build a small Spring Boot application
-(`test/fixtures/spring-broker`) into a Docker image. They test this
-library's client against Spring's broker, and Spring's client against this
-library's server.
+(`test/fixtures/spring-broker`) into a Docker image, and run the official
+`rabbitmq:4` image with the Web STOMP plugin enabled. They test this
+library's client against Spring's broker and against RabbitMQ, and Spring's
+client against this library's server.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 
