@@ -4,6 +4,12 @@
   "description": "STOMP over WebSocket client and server for browser-side and server-side JavaScript runtimes",
   "license": "MIT",
   "author": "Jacopo Scazzosi <jacopo@scazzosi.com>",
+  "homepage": "https://github.com/jacoscaz/typed-stomp",
+  "bugs": "https://github.com/jacoscaz/typed-stomp/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jacoscaz/typed-stomp.git"
+  },
   "type": "module",
   "sideEffects": false,
   "engines": {
