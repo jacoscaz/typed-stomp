@@ -8,7 +8,7 @@ import type { BrokerSession } from '../../src/server/broker.ts';
 import type { ServerSession } from '../../src/server/session.ts';
 import { MemoryTransport } from '../../src/transport/memory.ts';
 import type { TransportData } from '../../src/transport/types.ts';
-import { until } from '../client/fake-server.ts';
+import { delay, until } from '../client/fake-server.ts';
 import { flush } from '../helpers.ts';
 import { recordingBroker, serve, session } from './helpers.ts';
 
@@ -98,6 +98,9 @@ describe('ServerSession', () => {
       const { broker } = recordingBroker();
       const { server, transport } = serve({ broker, connectTimeout: 20 });
       const peer = raw(transport);
+      // `until` counts event-loop turns, which can take less than 20 ms:
+      // wait for the timeout in real time first.
+      await delay(20);
       await until(() => peer.closed);
       assert.match(peer.received[0] ?? '', /No CONNECT frame received within 20 ms/);
       assert.equal(server.sessions.length, 0);
