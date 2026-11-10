@@ -10,8 +10,7 @@ import { WebSocket as WsWebSocket } from 'ws';
 import { Client, type ClientOptions } from '../../src/client/client.ts';
 import type { StompMessage } from '../../src/client/message.ts';
 import type { WebSocketConstructor } from '../../src/transport/websocket.ts';
-import { until } from '../client/fake-server.ts';
-import { docker, dockerAvailable, retry, runDetached, type Container } from './docker.ts';
+import { docker, dockerAvailable, eventually, retry, runDetached, type Container } from './docker.ts';
 
 const IMAGE = 'rabbitmq:4';
 const WEB_STOMP_PORT = 15674;
@@ -93,7 +92,7 @@ describe('RabbitMQ interoperability', { skip }, () => {
       const topic = `/topic/typed-stomp.${randomUUID()}`;
       const sub = await collect(client, topic);
       await client.publish(topic, 'héllo, RabbitMQ', { receipt: true, headers: { custom: 'header' } });
-      await until(() => sub.messages.length === 1);
+      await eventually(() => sub.messages.length === 1);
       assert.deepEqual(sub.texts(), ['héllo, RabbitMQ']);
       assert.equal(sub.messages[0]?.headers['custom'], 'header');
     });
@@ -108,7 +107,7 @@ describe('RabbitMQ interoperability', { skip }, () => {
     await producer.publish(queue, JSON.stringify({ n: 1 }), { receipt: true, contentType: 'application/json' });
     await producer.publish(queue, JSON.stringify({ n: 2 }), { receipt: true, contentType: 'application/json' });
     const sub = await collect(consumer, queue);
-    await until(() => sub.messages.length === 2);
+    await eventually(() => sub.messages.length === 2);
     assert.deepEqual(
       sub.messages.map((message) => message.json()),
       [{ n: 1 }, { n: 2 }],
@@ -122,11 +121,11 @@ describe('RabbitMQ interoperability', { skip }, () => {
     const sub = await collect(client, queue, { ack: 'client-individual', headers: { 'prefetch-count': '1' } });
     await client.publish(queue, '1', { receipt: true });
     await client.publish(queue, '2', { receipt: true });
-    await until(() => sub.messages.length === 1);
+    await eventually(() => sub.messages.length === 1);
     await settle();
     assert.deepEqual(sub.texts(), ['1']);
     await sub.messages[0]!.ack({ receipt: true });
-    await until(() => sub.messages.length === 2);
+    await eventually(() => sub.messages.length === 2);
     assert.deepEqual(sub.texts(), ['1', '2']);
     await sub.messages[1]!.ack({ receipt: true });
   });
@@ -138,7 +137,7 @@ describe('RabbitMQ interoperability', { skip }, () => {
       message.headers['redelivered'] === 'true' ? message.ack() : message.nack(),
     );
     await client.publish(queue, 'retry me', { receipt: true });
-    await until(() => sub.messages.length === 2);
+    await eventually(() => sub.messages.length === 2);
     assert.deepEqual(sub.texts(), ['retry me', 'retry me']);
     assert.deepEqual(
       sub.messages.map((message) => message.headers['redelivered']),
@@ -151,11 +150,11 @@ describe('RabbitMQ interoperability', { skip }, () => {
     const first = await connect();
     const a = await collect(first, queue, { ack: 'client' });
     await first.publish(queue, 'unacked', { receipt: true });
-    await until(() => a.messages.length === 1);
+    await eventually(() => a.messages.length === 1);
     await first.close();
     await using second = await connect();
     const b = await collect(second, queue, { ack: 'client' });
-    await until(() => b.messages.length === 1);
+    await eventually(() => b.messages.length === 1);
     assert.equal(b.messages[0]?.text(), 'unacked');
     assert.equal(b.messages[0]?.headers['redelivered'], 'true');
     await b.messages[0]!.ack({ receipt: true });
@@ -174,7 +173,7 @@ describe('RabbitMQ interoperability', { skip }, () => {
       await settle();
       assert.deepEqual(sub.texts(), []);
     });
-    await until(() => sub.messages.length === 2);
+    await eventually(() => sub.messages.length === 2);
     await assert.rejects(
       client.transaction(async (tx) => {
         await tx.send(queue, 'aborted');
@@ -183,7 +182,7 @@ describe('RabbitMQ interoperability', { skip }, () => {
       /roll back/,
     );
     await client.publish(queue, 'after', { receipt: true });
-    await until(() => sub.messages.length === 3);
+    await eventually(() => sub.messages.length === 3);
     assert.deepEqual(sub.texts(), ['committed 1', 'committed 2', 'after']);
   });
 
@@ -194,10 +193,10 @@ describe('RabbitMQ interoperability', { skip }, () => {
     const sub = await collect(client, queue, { ack: 'client-individual', headers: { 'prefetch-count': '1' } });
     await client.publish(queue, '1', { receipt: true });
     await client.publish(queue, '2', { receipt: true });
-    await until(() => sub.messages.length === 1);
+    await eventually(() => sub.messages.length === 1);
     // In 1.1, ACK carries message-id and subscription instead of an ack id.
     await sub.messages[0]!.ack({ receipt: true });
-    await until(() => sub.messages.length === 2);
+    await eventually(() => sub.messages.length === 2);
     assert.deepEqual(sub.texts(), ['1', '2']);
   });
 

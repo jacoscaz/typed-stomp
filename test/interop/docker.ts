@@ -111,3 +111,18 @@ export async function waitForHttp(url: string, timeout = 120_000): Promise<void>
     }
   }
 }
+
+/**
+ * Polls `condition` in real time until it holds, or throws after `timeout`
+ * ms. Unlike `until`, which counts event-loop turns, this suits waiting on
+ * network round-trips to a container.
+ */
+export async function eventually(condition: () => boolean, timeout = 10_000, interval = 10): Promise<void> {
+  const deadline = Date.now() + timeout;
+  while (!condition()) {
+    if (Date.now() > deadline) {
+      throw new Error(`Condition not met within ${timeout} ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, interval));
+  }
+}

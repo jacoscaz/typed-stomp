@@ -12,8 +12,7 @@ import { Client } from '../../src/client/client.ts';
 import type { StompMessage } from '../../src/client/message.ts';
 import { WebSocketBroker } from '../../src/server/websocket.ts';
 import type { WebSocketConstructor } from '../../src/transport/websocket.ts';
-import { until } from '../client/fake-server.ts';
-import { buildImage, dockerAvailable, runDetached, runToCompletion, waitForHttp, type Container } from './docker.ts';
+import { buildImage, dockerAvailable, eventually, runDetached, runToCompletion, waitForHttp, type Container } from './docker.ts';
 
 const IMAGE = 'typed-stomp-spring-interop';
 const FIXTURE = fileURLToPath(new URL('../fixtures/spring-broker', import.meta.url));
@@ -31,7 +30,7 @@ const implementations: [string, WebSocketConstructor<never> | undefined][] = [
  * inbound frames on a thread pool, so a SEND right after a SUBSCRIBE can
  * overtake it. Give Spring a moment to register subscriptions.
  */
-const subscriptionSettled = () => new Promise((resolve) => setTimeout(resolve, 200));
+const subscriptionSettled = () => new Promise((resolve) => setTimeout(resolve, 500));
 
 describe('Spring interoperability', { skip }, () => {
   // The first build downloads Maven dependencies and can take minutes.
@@ -72,7 +71,7 @@ describe('Spring interoperability', { skip }, () => {
         await sub.ready;
         await subscriptionSettled();
         await client.publish('/app/echo', 'héllo, Spring');
-        await until(() => received.length === 1);
+        await eventually(() => received.length === 1);
         assert.deepEqual(received, ['héllo, Spring']);
       });
     }
@@ -91,7 +90,7 @@ describe('Spring interoperability', { skip }, () => {
         contentType: 'application/json',
         headers: { custom: 'header' },
       });
-      await until(() => messages.length === 1);
+      await eventually(() => messages.length === 1);
       const message = messages[0]!;
       assert.deepEqual(message.json(), { n: 42 });
       assert.match(message.contentType ?? '', /^application\/json/);
@@ -109,7 +108,7 @@ describe('Spring interoperability', { skip }, () => {
       await sub.ready;
       await subscriptionSettled();
       await client.publish('/app/upper', 'shout');
-      await until(() => received.length === 1);
+      await eventually(() => received.length === 1);
       assert.deepEqual(received, ['SHOUT']);
     });
 
@@ -162,7 +161,7 @@ describe('Spring interoperability', { skip }, () => {
       });
       assert.equal(code, 0, output.split('\n').filter((line) => /INTEROP|CONNECTED|RECEIVED|RECEIPT|Exception/.test(line)).join('\n'));
       assert.match(output, /INTEROP OK/);
-      await until(() => broker.server.sessions.length === 1);
+      await eventually(() => broker.server.sessions.length === 1);
     });
   });
 });
