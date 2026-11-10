@@ -1,6 +1,6 @@
 {
   "name": "typed-stomp",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "STOMP over WebSocket client and server for browser-side and server-side JavaScript runtimes",
   "license": "MIT",
   "author": "Jacopo Scazzosi <jacopo@scazzosi.com>",
