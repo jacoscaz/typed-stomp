@@ -272,6 +272,25 @@ wss.on('connection', (socket, request) => server.accept(new WebSocketTransport(s
   `abort`, the server buffers transactional frames and replays them on
   commit.
 
+## Command-line client
+
+The package ships a basic `typed-stomp` command, built on `Client` and the
+runtime's standard `WebSocket` (no `ws` needed):
+
+```sh
+export STOMP_URL=ws://localhost:15674/ws STOMP_LOGIN=guest STOMP_PASSCODE=guest
+
+npx typed-stomp subscribe /topic/news /queue/jobs --json   # until Ctrl+C
+npx typed-stomp subscribe /queue/jobs --ack client -n 10    # exit after 10 messages
+npx typed-stomp send /topic/news 'Hello!' --receipt
+echo '{"id":1}' | npx typed-stomp send /queue/jobs -t application/json -H priority:9
+```
+
+Connection settings can also be passed as `--url`, `--login` and
+`--passcode`. Run `typed-stomp --help` for all options. The command exits
+with 0 on success, 1 on connection or broker errors, 2 on usage errors and
+130 when interrupted.
+
 ## Lower-level building blocks
 
 - `typed-stomp/codec`: an incremental frame parser (with size limits) and a
